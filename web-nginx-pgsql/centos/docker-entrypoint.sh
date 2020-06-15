@@ -31,6 +31,9 @@ ZABBIX_ETC_DIR="/etc/zabbix"
 # Web interface www-root directory
 ZBX_FRONTEND_PATH="/usr/share/zabbix"
 
+# Nginx access log directive
+NGINX_ACCESS_LOG=${NGINX_ACCESS_LOG:-"true"}
+
 # usage: file_env VAR [DEFAULT]
 # as example: file_env 'MYSQL_PASSWORD' 'zabbix'
 #    (will allow for "$MYSQL_PASSWORD_FILE" to fill in the value of "$MYSQL_PASSWORD" from a file)
@@ -221,6 +224,18 @@ prepare_web_server() {
     else
         echo "**** Impossible to enable SSL support for Nginx. Certificates are missed."
     fi
+    
+    if [ -f "$ZABBIX_ETC_DIR/nginx.conf" ] && [ "${NGINX_ACCESS_LOG}" == "true" ]; then
+        sed -i \
+            -e "s|{NGINX_ACCESS_LOG}|/dev/fd/1 main|g" \
+        "$ZABBIX_ETC_DIR/nginx.conf"
+    fi
+
+    if [ -f "$ZABBIX_ETC_DIR/nginx_ssl.conf" ] && [ "${NGINX_ACCESS_LOG}" == "true" ]; then
+        sed -i \
+            -e "s|{NGINX_ACCESS_LOG}|/dev/fd/1 main|g" \
+        "$ZABBIX_ETC_DIR/nginx_ssl.conf"
+    fi
 }
 
 prepare_zbx_web_config() {
@@ -276,6 +291,7 @@ prepare_zbx_web_config() {
         -e "s/{ZBX_DB_CA_FILE}/${ZBX_DB_CA_FILE}/g" \
         -e "s/{ZBX_DB_VERIFY_HOST}/${ZBX_DB_VERIFY_HOST:-"false"}/g" \
         -e "s/{ZBX_DB_CIPHER_LIST}/${ZBX_DB_CIPHER_LIST}/g" \
+        -e "s/{DB_DOUBLE_IEEE754}/${DB_DOUBLE_IEEE754:-"true"}/g" \
         -e "s/{ZBX_HISTORYSTORAGEURL}/$history_storage_url/g" \
         -e "s/{ZBX_HISTORYSTORAGETYPES}/$history_storage_types/g" \
     "$ZBX_WEB_CONFIG"
