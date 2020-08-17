@@ -31,9 +31,6 @@ ZABBIX_ETC_DIR="/etc/zabbix"
 # Web interface www-root directory
 ZBX_FRONTEND_PATH="/usr/share/zabbix"
 
-# Nginx access log directive
-NGINX_ACCESS_LOG=${NGINX_ACCESS_LOG:-"true"}
-
 # usage: file_env VAR [DEFAULT]
 # as example: file_env 'MYSQL_PASSWORD' 'zabbix'
 #    (will allow for "$MYSQL_PASSWORD_FILE" to fill in the value of "$MYSQL_PASSWORD" from a file)
@@ -194,13 +191,24 @@ check_db_connect() {
         export PGOPTIONS
     fi
 
-    while [ ! "$(psql -h ${DB_SERVER_HOST} -p ${DB_SERVER_PORT} -U ${DB_SERVER_ROOT_USER} -d ${DB_SERVER_DBNAME} -l -q 2>/dev/null)" ]; do
+    if [ -n "${ZBX_DBTLSCONNECT}" ]; then
+        export PGSSLMODE=${ZBX_DBTLSCONNECT//_/-}
+        export PGSSLROOTCERT=${ZBX_DBTLSCAFILE}
+        export PGSSLCERT=${ZBX_DBTLSCERTFILE}
+        export PGSSLKEY=${ZBX_DBTLSKEYFILE}
+    fi
+
+    while [ ! "$(psql --host ${DB_SERVER_HOST} --port ${DB_SERVER_PORT} --username ${DB_SERVER_ROOT_USER} --dbname ${DB_SERVER_DBNAME} --list --quiet 2>/dev/null)" ]; do
         echo "**** PostgreSQL server is not available. Waiting $WAIT_TIMEOUT seconds..."
         sleep $WAIT_TIMEOUT
     done
 
     unset PGPASSWORD
     unset PGOPTIONS
+    unset PGSSLMODE
+    unset PGSSLROOTCERT
+    unset PGSSLCERT
+    unset PGSSLKEY
 }
 
 prepare_web_server() {
@@ -223,30 +231,6 @@ prepare_web_server() {
         fi
     else
         echo "**** Impossible to enable SSL support for Nginx. Certificates are missed."
-    fi
-    
-    if [ -f "$ZABBIX_ETC_DIR/nginx.conf" ]; then
-        if [ "${NGINX_ACCESS_LOG}" == "true" ]; then
-            sed -i \
-                -e "s|{NGINX_ACCESS_LOG}|/dev/fd/1 main|g" \
-            "$ZABBIX_ETC_DIR/nginx.conf"
-        else
-            sed -i \
-                -e "s|{NGINX_ACCESS_LOG}|off|g" \
-            "$ZABBIX_ETC_DIR/nginx.conf"
-        fi
-    fi
-
-    if [ -f "$ZABBIX_ETC_DIR/nginx_ssl.conf" ]; then
-        if [ "${NGINX_ACCESS_LOG}" == "true" ]; then
-            sed -i \
-                -e "s|{NGINX_ACCESS_LOG}|/dev/fd/1 main|g" \
-            "$ZABBIX_ETC_DIR/nginx.conf"
-        else
-            sed -i \
-                -e "s|{NGINX_ACCESS_LOG}|off|g" \
-            "$ZABBIX_ETC_DIR/nginx.conf"
-        fi
     fi
 }
 
@@ -312,6 +296,18 @@ prepare_zbx_web_config() {
         cp "$ZBX_WWW_ROOT/include/defines.inc.php" "/tmp/defines.inc.php_tmp"
         sed "/ZBX_SESSION_NAME/s/'[^']*'/'${ZBX_SESSION_NAME}'/2" "/tmp/defines.inc.php_tmp" > "$ZBX_WWW_ROOT/include/defines.inc.php"
         rm -f "/tmp/defines.inc.php_tmp"
+    fi
+
+    if [ "${ENABLE_WEB_ACCESS_LOG:-"true"}" == "false" ]; then
+        sed -ri \
+            -e 's!^(\s*access_log).+\;!\1 off\;!g' \
+            "/etc/nginx/nginx.conf"
+        sed -ri \
+            -e 's!^(\s*access_log).+\;!\1 off\;!g' \
+            "/etc/zabbix/nginx.conf"
+        sed -ri \
+            -e 's!^(\s*access_log).+\;!\1 off\;!g' \
+            "/etc/zabbix/nginx_ssl.conf"
     fi
 }
 
